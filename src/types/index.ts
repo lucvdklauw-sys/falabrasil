@@ -107,7 +107,7 @@ export interface UserProgress {
 // Exercises
 // ============================================================================
 
-export type ExerciseKind = "target-to-source" | "source-to-target" | "type-in";
+export type ExerciseKind = "target-to-source" | "source-to-target" | "type-in" | "sentence-match";
 
 export interface ExerciseResult {
   wordId: string;
