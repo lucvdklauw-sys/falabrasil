@@ -74,6 +74,42 @@ export function useProgress() {
     });
   }, []);
 
+  /** Records an answer from the optional, standalone Schrijftest (typing
+   * test across all 300 words). Updates word progress and daily history
+   * like a normal answer, but deliberately does NOT touch hearts — the
+   * typing test is meant to be low-pressure practice you can always do,
+   * even with zero hearts left in the regular learning flow. */
+  const recordTypingAnswer = useCallback((wordId: string, correct: boolean) => {
+    setProgress((p) => {
+      const current = p.wordsProgress[wordId] ?? createInitialWordProgress(wordId);
+      const updated = applyReviewResult(current, correct, "type-in");
+      const today = todayStr();
+      const history = [...p.history];
+      const idx = history.findIndex((h) => h.date === today);
+      if (idx >= 0) {
+        history[idx] = {
+          ...history[idx],
+          wordsReviewed: history[idx].wordsReviewed + 1,
+          correct: history[idx].correct + (correct ? 1 : 0),
+          wrong: history[idx].wrong + (correct ? 0 : 1),
+        };
+      } else {
+        history.push({
+          date: today,
+          wordsReviewed: 1,
+          correct: correct ? 1 : 0,
+          wrong: correct ? 0 : 1,
+        });
+      }
+      return {
+        ...p,
+        points: p.points + (correct ? 10 : 0),
+        wordsProgress: { ...p.wordsProgress, [wordId]: updated },
+        history: history.slice(-90),
+      };
+    });
+  }, []);
+
   /** Marks a word as "introduced" — the learner has seen the NL/PT pair,
    * heard it, and read the example sentence. Never gates on correctness;
    * introduction has no right/wrong answer. */
@@ -166,6 +202,7 @@ export function useProgress() {
     progress,
     getWordProgress,
     recordAnswer,
+    recordTypingAnswer,
     markWordIntroduced,
     toggleFavorite,
     restoreHearts,
