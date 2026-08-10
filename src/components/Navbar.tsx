@@ -55,6 +55,7 @@ export function Navbar({
         <nav className="flex items-center gap-1 sm:gap-2" aria-label="Hoofdnavigatie">
           {navItem("dashboard", "Start", "🏠")}
           {navItem("dictionary", "Woordenboek", "📖")}
+          {navItem("typetest", "Schrijftest", "✍️")}
           {navItem("stats", "Statistieken", "📊")}
         </nav>
 
