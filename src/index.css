@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brasil-green: #009739;
+  --color-brasil-green-dark: #00732b;
+  --color-brasil-yellow: #ffdf00;
+  --color-brasil-blue: #002776;
+  --font-display: "Baloo 2", "Nunito", ui-rounded, system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-family: var(--font-body);
+    background-color: #fffdf5;
+    color: #0b2545;
+  }
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  /* Consistent, visible keyboard focus ring across every interactive element. */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--color-brasil-blue);
+    outline-offset: 2px;
+    border-radius: 10px;
+  }
+
+  /* Respect the OS-level "reduce motion" preference for anything not
+     already handled by Framer Motion's MotionConfig. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--color-brasil-blue);
+  color: white;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0 0 0.75rem 0;
+  font-weight: 700;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+@layer utilities {
+  .btn-pop {
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .btn-pop:active {
+    transform: scale(0.94) translateY(2px);
+  }
+  .shake {
+    animation: shake 0.4s ease;
+  }
+  @keyframes shake {
+    10%, 90% { transform: translateX(-2px); }
+    20%, 80% { transform: translateX(4px); }
+    30%, 50%, 70% { transform: translateX(-8px); }
+    40%, 60% { transform: translateX(8px); }
+  }
+  .scrollbar-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 9999px; }
+}
