@@ -12,8 +12,9 @@ import { Mascot } from "./components/Mascot";
 const Dictionary = lazy(() => import("./components/Dictionary").then((m) => ({ default: m.Dictionary })));
 const Stats = lazy(() => import("./components/Stats").then((m) => ({ default: m.Stats })));
 const ExerciseView = lazy(() => import("./components/ExerciseView").then((m) => ({ default: m.ExerciseView })));
+const TypingTest = lazy(() => import("./components/TypingTest").then((m) => ({ default: m.TypingTest })));
 
-export type View = "dashboard" | "dictionary" | "stats" | "exercise";
+export type View = "dashboard" | "dictionary" | "stats" | "exercise" | "typetest";
 
 function ViewLoader() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
     progress,
     getWordProgress,
     recordAnswer,
+    recordTypingAnswer,
     markWordIntroduced,
     toggleFavorite,
     getReviewQueue,
@@ -134,6 +136,8 @@ export default function App() {
                 onRestartMistakes={restartWithMistakes}
               />
             )}
+
+            {view === "typetest" && <TypingTest onAnswer={recordTypingAnswer} />}
           </Suspense>
         </main>
       </div>
