@@ -1,5 +1,7 @@
 import { motion } from "framer-motion";
 import type { DailyActivity, UserProgress } from "../types";
+import { badges } from "../data/badges";
+import { levelFromXp, xpIntoLevel } from "../utils/gamification";
 
 function StatCard({ icon, label, value, sub }: { icon: string; label: string; value: string; sub?: string }) {
   return (
@@ -75,7 +77,13 @@ export function Stats({
         <StatCard icon="📚" label="Totaal geleerd" value={`${totalLearned}/${totalWords}`} />
         <StatCard icon="🎯" label="Juist percentage" value={`${overallAccuracy}%`} />
         <StatCard icon="🔁" label="Geoefende woorden" value={`${totalReviewed}`} />
-        <StatCard icon="⭐" label="Punten" value={`${progress.points}`} />
+        <StatCard icon="⭐" label="Punten (XP)" value={`${progress.points}`} />
+        <StatCard
+          icon="🏅"
+          label="Niveau"
+          value={`${levelFromXp(progress.points)}`}
+          sub={`${xpIntoLevel(progress.points).current}/${xpIntoLevel(progress.points).needed} XP tot volgend niveau`}
+        />
         <StatCard icon="🔥" label="Streak" value={`${progress.streak} dagen`} />
         <StatCard
           icon="🎯"
@@ -87,6 +95,32 @@ export function Stats({
 
       <div className="mt-6">
         <WeekChart history={progress.history} />
+      </div>
+
+      <div className="mt-6 rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+        <h3 className="font-display font-bold text-blue-950">Badges</h3>
+        <p className="mt-1 text-sm text-blue-900/50">
+          {progress.earnedBadgeIds.length} van {badges.length} behaald
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {badges.map((b) => {
+            const earned = progress.earnedBadgeIds.includes(b.id);
+            return (
+              <div
+                key={b.id}
+                className={`flex items-start gap-3 rounded-2xl border p-3 ${
+                  earned ? "border-yellow-300 bg-yellow-50" : "border-gray-100 bg-gray-50 opacity-50"
+                }`}
+              >
+                <span className="text-2xl" aria-hidden="true">{b.icon}</span>
+                <span>
+                  <span className="block text-sm font-bold text-blue-950">{b.titleNl}</span>
+                  <span className="block text-xs text-blue-900/50">{b.descriptionNl}</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

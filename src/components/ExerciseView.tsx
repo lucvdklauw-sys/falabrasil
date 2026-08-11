@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Category, ExerciseKind, Word, WordProgress } from "../types";
-import { buildLearningSteps, buildOptions, buildSentenceOptions, type LearningStep } from "../utils/exercises";
+import {
+  buildClozeSentence,
+  buildLearningSteps,
+  buildOptions,
+  buildSentenceOptions,
+  buildWordInContextOptions,
+  type LearningStep,
+} from "../utils/exercises";
 import { pickCorrectMessage, pickWrongMessage } from "../utils/encouragement";
 import { useTTS } from "../hooks/useTTS";
 import { Mascot } from "./Mascot";
@@ -28,6 +35,7 @@ export function ExerciseView({
   onIntroduced,
   onExit,
   onRestartMistakes,
+  onComplete,
 }: {
   category: Category;
   queue: Word[];
@@ -37,6 +45,9 @@ export function ExerciseView({
   onIntroduced: (wordId: string) => void;
   onExit: () => void;
   onRestartMistakes?: (words: Word[]) => void;
+  /** Fired once, the moment the session queue is fully completed (not on
+   *  early exit) — lets the caller mark a theme's "Woorden leren" step done. */
+  onComplete?: () => void;
 }) {
   const { speak } = useTTS();
   // Built once, at mount, from a live snapshot of progress at that moment.
@@ -55,6 +66,11 @@ export function ExerciseView({
   const done = index >= session.length;
   const outOfHearts = hearts <= 0;
   const totalAnswerable = useMemo(() => session.filter((s) => s.kind !== "intro").length, [session]);
+
+  useEffect(() => {
+    if (done) onComplete?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done]);
 
   // Auto-play pronunciation once when a brand-new word is introduced.
   useEffect(() => {
@@ -76,7 +92,14 @@ export function ExerciseView({
     if (current.kind === "source-to-target") return buildOptions(current.word, "target");
     if (current.kind === "target-to-source") return buildOptions(current.word, "source");
     if (current.kind === "sentence-match") return buildSentenceOptions(current.word);
+    if (current.kind === "cloze") return buildClozeSentence(current.word).options;
+    if (current.kind === "word-in-context") return buildWordInContextOptions(current.word);
     return [];
+  }, [current]);
+
+  const clozeSentence = useMemo(() => {
+    if (!current || current.kind !== "cloze") return "";
+    return buildClozeSentence(current.word).blanked;
   }, [current]);
 
   function registerResult(correct: boolean, kind: ExerciseKind) {
@@ -93,6 +116,7 @@ export function ExerciseView({
   function correctAnswerFor(kind: ExerciseKind, word: Word): string {
     if (kind === "target-to-source") return word.source;
     if (kind === "sentence-match") return word.exampleSource;
+    // "cloze" and "word-in-context" both resolve to the Portuguese target word
     return word.target;
   }
 
@@ -273,6 +297,30 @@ export function ExerciseView({
               selected={selected}
               feedback={feedback}
               correctAnswer={current.word.exampleSource}
+              onChoose={handleChoice}
+              onSkip={handleSkip}
+              onSpeak={() => speak(current.word.exampleTarget)}
+            />
+          )}
+          {current.kind === "cloze" && (
+            <ClozeCard
+              blanked={clozeSentence}
+              options={options}
+              selected={selected}
+              feedback={feedback}
+              correctAnswer={current.word.target}
+              onChoose={handleChoice}
+              onSkip={handleSkip}
+              onSpeak={() => speak(current.word.exampleTarget)}
+            />
+          )}
+          {current.kind === "word-in-context" && (
+            <WordInContextCard
+              word={current.word}
+              options={options}
+              selected={selected}
+              feedback={feedback}
+              correctAnswer={current.word.target}
               onChoose={handleChoice}
               onSkip={handleSkip}
               onSpeak={() => speak(current.word.exampleTarget)}
@@ -502,6 +550,154 @@ function SentenceCard({
             >
               <span aria-hidden="true" className="mt-0.5 text-xs font-bold text-blue-900/30">{i + 1}</span>
               <span>{opt}</span>
+            </button>
+          );
+        })}
+      </div>
+      {feedback === "idle" && (
+        <button onClick={onSkip} className="btn-pop mt-4 text-sm font-semibold text-blue-900/40 hover:text-blue-900/70">
+          Ik weet het niet →
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+/** "Vul het ontbrekende woord in" — the target word is blanked out of its
+ * own Portuguese example sentence; the learner picks the right word from
+ * 4 options, practising it inside real context instead of in isolation. */
+function ClozeCard({
+  blanked,
+  options,
+  selected,
+  feedback,
+  correctAnswer,
+  onChoose,
+  onSkip,
+  onSpeak,
+}: {
+  blanked: string;
+  options: string[];
+  selected: string | null;
+  feedback: FeedbackState;
+  correctAnswer: string;
+  onChoose: (choice: string) => void;
+  onSkip: () => void;
+  onSpeak: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (feedback !== "idle") return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= options.length) onChoose(options[n - 1]);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [options, feedback, onChoose]);
+
+  return (
+    <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+      <p className="text-sm font-semibold uppercase tracking-wide text-blue-900/40">Welk woord ontbreekt?</p>
+      <div className="mt-2 flex items-start gap-3 rounded-2xl bg-blue-50 p-4">
+        <p className="font-display flex-1 text-xl font-bold text-blue-950" lang="pt-BR">{blanked}</p>
+        <button onClick={onSpeak} aria-label="Beluister zin" className="btn-pop shrink-0 rounded-full bg-white p-2 text-xl text-emerald-700 shadow-sm hover:bg-emerald-50">
+          🔊
+        </button>
+      </div>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {options.map((opt, i) => {
+          const isSelected = selected === opt;
+          const isCorrectOpt = opt === correctAnswer;
+          let style = "border-emerald-100 bg-white hover:border-emerald-300 hover:bg-emerald-50";
+          if (feedback !== "idle") {
+            if (isCorrectOpt) style = "border-emerald-500 bg-emerald-50 text-emerald-900";
+            else if (isSelected) style = "border-red-400 bg-red-50 text-red-800";
+            else style = "border-gray-100 bg-white opacity-60";
+          }
+          return (
+            <button
+              key={opt}
+              disabled={feedback !== "idle"}
+              onClick={() => onChoose(opt)}
+              className={`btn-pop flex min-h-[52px] items-center gap-2 rounded-2xl border-2 px-4 py-3 text-left text-base font-semibold shadow-sm transition-colors ${style}`}
+            >
+              <span aria-hidden="true" className="text-xs font-bold text-blue-900/30">{i + 1}</span>
+              <span lang="pt-BR">{opt}</span>
+            </button>
+          );
+        })}
+      </div>
+      {feedback === "idle" && (
+        <button onClick={onSkip} className="btn-pop mt-4 text-sm font-semibold text-blue-900/40 hover:text-blue-900/70">
+          Ik weet het niet →
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** "Woord herkennen in context" — given the Dutch meaning, the learner
+ * picks which Portuguese word in the (unblanked) sentence carries that
+ * meaning, from 4 real-word options. */
+function WordInContextCard({
+  word,
+  options,
+  selected,
+  feedback,
+  correctAnswer,
+  onChoose,
+  onSkip,
+  onSpeak,
+}: {
+  word: Word;
+  options: string[];
+  selected: string | null;
+  feedback: FeedbackState;
+  correctAnswer: string;
+  onChoose: (choice: string) => void;
+  onSkip: () => void;
+  onSpeak: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (feedback !== "idle") return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= options.length) onChoose(options[n - 1]);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [options, feedback, onChoose]);
+
+  return (
+    <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+      <p className="text-sm font-semibold uppercase tracking-wide text-blue-900/40">Welk woord betekent:</p>
+      <h2 className="font-display mt-2 text-3xl font-extrabold text-blue-950">{word.source}</h2>
+      <div className="mt-4 flex items-start gap-3 rounded-2xl bg-blue-50 p-4">
+        <p className="flex-1 text-base font-semibold text-blue-950" lang="pt-BR">{word.exampleTarget}</p>
+        <button onClick={onSpeak} aria-label="Beluister zin" className="btn-pop shrink-0 rounded-full bg-white p-2 text-xl text-emerald-700 shadow-sm hover:bg-emerald-50">
+          🔊
+        </button>
+      </div>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {options.map((opt, i) => {
+          const isSelected = selected === opt;
+          const isCorrectOpt = opt === correctAnswer;
+          let style = "border-emerald-100 bg-white hover:border-emerald-300 hover:bg-emerald-50";
+          if (feedback !== "idle") {
+            if (isCorrectOpt) style = "border-emerald-500 bg-emerald-50 text-emerald-900";
+            else if (isSelected) style = "border-red-400 bg-red-50 text-red-800";
+            else style = "border-gray-100 bg-white opacity-60";
+          }
+          return (
+            <button
+              key={opt}
+              disabled={feedback !== "idle"}
+              onClick={() => onChoose(opt)}
+              className={`btn-pop flex min-h-[52px] items-center gap-2 rounded-2xl border-2 px-4 py-3 text-left text-base font-semibold shadow-sm transition-colors ${style}`}
+            >
+              <span aria-hidden="true" className="text-xs font-bold text-blue-900/30">{i + 1}</span>
+              <span lang="pt-BR">{opt}</span>
             </button>
           );
         })}
