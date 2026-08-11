@@ -2,19 +2,41 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MotionConfig } from "framer-motion";
 import { useProgress } from "./hooks/useProgress";
 import { categories } from "./data/categories";
+import { modules } from "./data/modules";
+import { stories } from "./data/stories";
+import { dialogues } from "./data/dialogues";
+import { words as allWords } from "./data/words";
 import type { Word } from "./types";
+import { levelFromXp } from "./utils/gamification";
 import { Navbar } from "./components/Navbar";
 import { Dashboard } from "./components/Dashboard";
 import { BackgroundDecor } from "./components/BackgroundDecor";
 import { AppBanners } from "./components/AppBanners";
 import { Mascot } from "./components/Mascot";
+import { ModuleMap } from "./components/ModuleMap";
+import { ThemeHub, type ThemeStep } from "./components/ThemeHub";
 
 const Dictionary = lazy(() => import("./components/Dictionary").then((m) => ({ default: m.Dictionary })));
 const Stats = lazy(() => import("./components/Stats").then((m) => ({ default: m.Stats })));
 const ExerciseView = lazy(() => import("./components/ExerciseView").then((m) => ({ default: m.ExerciseView })));
 const TypingTest = lazy(() => import("./components/TypingTest").then((m) => ({ default: m.TypingTest })));
+const StoryView = lazy(() => import("./components/StoryView").then((m) => ({ default: m.StoryView })));
+const DialogueView = lazy(() => import("./components/DialogueView").then((m) => ({ default: m.DialogueView })));
+const ThemeQuiz = lazy(() => import("./components/ThemeQuiz").then((m) => ({ default: m.ThemeQuiz })));
+const ModuleExam = lazy(() => import("./components/ModuleExam").then((m) => ({ default: m.ModuleExam })));
 
-export type View = "dashboard" | "dictionary" | "stats" | "exercise" | "typetest";
+export type View =
+  | "dashboard"
+  | "dictionary"
+  | "stats"
+  | "exercise"
+  | "typetest"
+  | "module"
+  | "theme"
+  | "story"
+  | "dialogue"
+  | "themequiz"
+  | "moduleexam";
 
 function ViewLoader() {
   return (
@@ -39,6 +61,9 @@ export default function App() {
     overallAccuracy,
     todayCount,
     totalWords,
+    getThemeProgress,
+    markThemeStep,
+    recordModuleExam,
   } = useProgress();
 
   const [view, setView] = useState<View>("dashboard");
@@ -46,11 +71,28 @@ export default function App() {
   // Frozen for the lifetime of one exercise session — see ExerciseView for why.
   const [sessionQueue, setSessionQueue] = useState<Word[]>([]);
   const [sessionId, setSessionId] = useState(0);
+  // Non-null while the current /exercise session was launched from the
+  // Module 1 "Woorden leren" step — completing it marks that theme step done
+  // and returns to the theme hub instead of the flat dashboard.
+  const [themeExerciseId, setThemeExerciseId] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
 
+  const module1 = modules[0];
+  const activeModule = module1; // v1 only ships one module
+
   function startCategory(categoryId: string) {
+    setThemeExerciseId(null);
     setActiveCategoryId(categoryId);
     setSessionQueue(getReviewQueue(categoryId, 12));
+    setSessionId((s) => s + 1);
+    setView("exercise");
+  }
+
+  function startThemeWords(themeId: string) {
+    const catWords = allWords.filter((w) => w.categoryId === themeId);
+    setThemeExerciseId(themeId);
+    setActiveCategoryId(themeId);
+    setSessionQueue(getReviewQueue(themeId, catWords.length));
     setSessionId((s) => s + 1);
     setView("exercise");
   }
@@ -61,13 +103,37 @@ export default function App() {
   }
 
   function exitExercise() {
-    setActiveCategoryId(null);
-    setView("dashboard");
+    if (themeExerciseId) {
+      setActiveCategoryId(themeExerciseId);
+      setThemeExerciseId(null);
+      setView("theme");
+    } else {
+      setActiveCategoryId(null);
+      setView("dashboard");
+    }
   }
 
   function navigate(v: View) {
     if (v !== "exercise") setActiveCategoryId(null);
+    setThemeExerciseId(null);
     setView(v);
+  }
+
+  function openModule() {
+    setView("module");
+  }
+
+  function openTheme(themeId: string) {
+    setActiveCategoryId(themeId);
+    setView("theme");
+  }
+
+  function selectThemeStep(step: ThemeStep) {
+    if (!activeCategoryId) return;
+    if (step === "words") startThemeWords(activeCategoryId);
+    else if (step === "story") setView("story");
+    else if (step === "dialogue") setView("dialogue");
+    else if (step === "quiz") setView("themequiz");
   }
 
   // Move focus to the main region on view change — helps screen-reader and
@@ -77,6 +143,7 @@ export default function App() {
   }, [view]);
 
   const activeCategory = categories.find((c) => c.id === activeCategoryId) ?? null;
+  const level = levelFromXp(progress.points);
 
   return (
     <MotionConfig reducedMotion="user">
@@ -106,6 +173,30 @@ export default function App() {
               todayCount={todayCount}
               dailyGoal={progress.dailyGoal}
               onSelectCategory={startCategory}
+              getThemeProgress={getThemeProgress}
+              onOpenModule={openModule}
+              level={level}
+            />
+          )}
+
+          {view === "module" && activeModule && (
+            <ModuleMap
+              module={activeModule}
+              getThemeProgress={getThemeProgress}
+              examDone={progress.moduleProgress[activeModule.id]?.examDone ?? false}
+              examScore={progress.moduleProgress[activeModule.id]?.examScore ?? 0}
+              onSelectTheme={openTheme}
+              onSelectExam={() => setView("moduleexam")}
+              onBack={() => navigate("dashboard")}
+            />
+          )}
+
+          {view === "theme" && activeCategory && (
+            <ThemeHub
+              category={activeCategory}
+              themeProgress={getThemeProgress(activeCategory.id)}
+              onSelectStep={selectThemeStep}
+              onBack={() => setView("module")}
             />
           )}
 
@@ -134,10 +225,58 @@ export default function App() {
                 onIntroduced={markWordIntroduced}
                 onExit={exitExercise}
                 onRestartMistakes={restartWithMistakes}
+                onComplete={themeExerciseId ? () => markThemeStep(themeExerciseId, "wordsDone") : undefined}
               />
             )}
 
             {view === "typetest" && <TypingTest onAnswer={recordTypingAnswer} />}
+
+            {view === "story" && activeCategoryId && (() => {
+              const story = stories.find((s) => s.themeId === activeCategoryId);
+              if (!story) return null;
+              return (
+                <StoryView
+                  story={story}
+                  onExit={() => setView("theme")}
+                  onComplete={() => markThemeStep(activeCategoryId, "storyDone")}
+                />
+              );
+            })()}
+
+            {view === "dialogue" && activeCategoryId && (() => {
+              const dialogue = dialogues.find((d) => d.themeId === activeCategoryId);
+              if (!dialogue) return null;
+              return (
+                <DialogueView
+                  dialogue={dialogue}
+                  onExit={() => setView("theme")}
+                  onComplete={() => markThemeStep(activeCategoryId, "dialogueDone")}
+                />
+              );
+            })()}
+
+            {view === "themequiz" && activeCategory && (
+              <ThemeQuiz
+                category={activeCategory}
+                words={allWords.filter((w) => w.categoryId === activeCategory.id)}
+                onExit={() => setView("theme")}
+                onFinish={(score) => {
+                  markThemeStep(activeCategory.id, "quizDone", score);
+                  setView("theme");
+                }}
+              />
+            )}
+
+            {view === "moduleexam" && activeModule && (
+              <ModuleExam
+                module={activeModule}
+                onExit={() => setView("module")}
+                onFinish={(score) => {
+                  recordModuleExam(activeModule.id, score);
+                  setView("module");
+                }}
+              />
+            )}
           </Suspense>
         </main>
       </div>
