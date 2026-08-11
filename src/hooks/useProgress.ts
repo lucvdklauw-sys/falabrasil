@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CategoryStats, ExerciseKind, UserProgress, Word, WordProgress } from "../types";
+import type { CategoryStats, ExerciseKind, ThemeProgress, UserProgress, Word, WordProgress } from "../types";
 import { words } from "../data/words";
 import { categories } from "../data/categories";
 import { defaultProgress, loadProgress, saveProgress, todayStr } from "../utils/storage";
 import { applyReviewResult, createInitialWordProgress, markIntroduced, reviewPriority } from "../utils/srs";
+import { computeEarnedBadgeIds } from "../utils/gamification";
+
+function emptyThemeProgress(themeId: string): ThemeProgress {
+  return { themeId, wordsDone: false, storyDone: false, dialogueDone: false, quizDone: false, quizScore: 0 };
+}
 
 export function useProgress() {
   const [progress, setProgress] = useState<UserProgress>(() => loadProgress() ?? defaultProgress());
@@ -156,6 +161,48 @@ export function useProgress() {
     [progress.wordsProgress]
   );
 
+  // ==========================================================================
+  // Theme / Module progression (Module 1 course structure)
+  // ==========================================================================
+
+  const getThemeProgress = useCallback(
+    (themeId: string): ThemeProgress => progress.themeProgress[themeId] ?? emptyThemeProgress(themeId),
+    [progress.themeProgress]
+  );
+
+  const markThemeStep = useCallback(
+    (themeId: string, step: "wordsDone" | "storyDone" | "dialogueDone" | "quizDone", score?: number) => {
+      setProgress((p) => {
+        const current = p.themeProgress[themeId] ?? emptyThemeProgress(themeId);
+        const updated: ThemeProgress = {
+          ...current,
+          [step]: true,
+          quizScore: step === "quizDone" && score !== undefined ? Math.max(current.quizScore, score) : current.quizScore,
+        };
+        return { ...p, themeProgress: { ...p.themeProgress, [themeId]: updated } };
+      });
+    },
+    []
+  );
+
+  const recordModuleExam = useCallback((moduleId: string, score: number) => {
+    setProgress((p) => {
+      const current = p.moduleProgress[moduleId];
+      const passed = score >= 80;
+      return {
+        ...p,
+        moduleProgress: {
+          ...p.moduleProgress,
+          [moduleId]: {
+            moduleId,
+            examDone: (current?.examDone ?? false) || passed,
+            examScore: Math.max(current?.examScore ?? 0, score),
+          },
+        },
+      };
+    });
+  }, []);
+
   const categoryStats: Record<string, CategoryStats> = useMemo(() => {
     const stats: Record<string, CategoryStats> = {};
     for (const cat of categories) {
@@ -198,6 +245,20 @@ export function useProgress() {
     return progress.history.find((h) => h.date === today)?.wordsReviewed ?? 0;
   }, [progress.history]);
 
+  // Recompute earned badges whenever relevant progress changes, and persist
+  // any newly-earned ones (append-only — badges are never revoked).
+  const earnedBadgeIds = useMemo(
+    () => computeEarnedBadgeIds(progress, totalLearned, words.length),
+    [progress, totalLearned]
+  );
+
+  useEffect(() => {
+    const newOnes = earnedBadgeIds.filter((id) => !progress.earnedBadgeIds.includes(id));
+    if (newOnes.length === 0) return;
+    setProgress((p) => ({ ...p, earnedBadgeIds: [...new Set([...p.earnedBadgeIds, ...newOnes])] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [earnedBadgeIds]);
+
   return {
     progress,
     getWordProgress,
@@ -212,5 +273,8 @@ export function useProgress() {
     overallAccuracy,
     todayCount,
     totalWords: words.length,
+    getThemeProgress,
+    markThemeStep,
+    recordModuleExam,
   };
 }
