@@ -95,19 +95,28 @@ export interface DailyActivity {
 export interface UserProgress {
   hearts: number;
   maxHearts: number;
-  points: number;
+  points: number; // also used as XP for the level system
   streak: number;
   lastActiveDate: string | null; // yyyy-mm-dd, for streak calc
   dailyGoal: number; // words/exercises per day
   wordsProgress: Record<string, WordProgress>;
   history: DailyActivity[];
+  themeProgress: Record<string, ThemeProgress>;
+  moduleProgress: Record<string, ModuleProgressEntry>;
+  earnedBadgeIds: string[];
 }
 
 // ============================================================================
 // Exercises
 // ============================================================================
 
-export type ExerciseKind = "target-to-source" | "source-to-target" | "type-in" | "sentence-match";
+export type ExerciseKind =
+  | "target-to-source"
+  | "source-to-target"
+  | "type-in"
+  | "sentence-match"
+  | "cloze"
+  | "word-in-context";
 
 export interface ExerciseResult {
   wordId: string;
@@ -127,4 +136,98 @@ export interface LearningModule {
   level: CefrLevel;
   /** implemented modules render real content; others show "binnenkort" */
   implemented: boolean;
+}
+
+// ============================================================================
+// Course structure — Modules, each containing exactly 5 Themes. A Theme
+// reuses an existing vocabulary Category as its word set, and additionally
+// carries a Story, a Dialogue, and a Theme Quiz. After 5 themes, a Module
+// Exam gates progress to the next module. This is deliberately layered on
+// top of the existing Category/Word data — no vocabulary duplication.
+// ============================================================================
+
+export interface CourseModule {
+  id: string;
+  titleNl: string;
+  order: number;
+  /** exactly 5 category ids, in the order they unlock within this module */
+  themeIds: string[];
+}
+
+// ----------------------------------------------------------------------------
+// Reading content: Stories & Dialogues. Every Portuguese word is glossable
+// (LingQ-style click-to-translate). Glosses are NOT stored per-sentence —
+// they're resolved at render time from the 300-word dataset plus a shared
+// glossary of common function words (see utils/glossary.ts), so authoring
+// a story is just writing pt/nl sentence pairs.
+// ----------------------------------------------------------------------------
+
+export interface WordGloss {
+  nl: string; // Dutch meaning of this exact token as used here
+  note?: string; // optional short grammar note (verb tense, gender, etc.)
+}
+
+export interface ReadingSentence {
+  pt: string;
+  nl: string;
+}
+
+export interface ComprehensionQuestion {
+  id: string;
+  questionNl: string;
+  options: string[];
+  correctIndex: number;
+}
+
+export interface Story {
+  id: string;
+  themeId: string; // categoryId
+  titleNl: string;
+  titlePt: string;
+  sentences: ReadingSentence[];
+  questions: ComprehensionQuestion[];
+}
+
+export interface DialogueLine {
+  speaker: "A" | "B";
+  pt: string;
+  nl: string;
+}
+
+export interface Dialogue {
+  id: string;
+  themeId: string;
+  titleNl: string;
+  scenario: string; // e.g. "Restaurant", "Aeroporto"
+  speakerA: string; // Brazilian character name
+  speakerB: string;
+  lines: DialogueLine[];
+  questions: ComprehensionQuestion[];
+}
+
+// ============================================================================
+// Progress: themes, modules, badges. Layered alongside the existing
+// per-word WordProgress / UserProgress — nothing here replaces those.
+// ============================================================================
+
+export interface ThemeProgress {
+  themeId: string;
+  wordsDone: boolean;
+  storyDone: boolean;
+  dialogueDone: boolean;
+  quizDone: boolean;
+  quizScore: number; // best %, 0-100
+}
+
+export interface ModuleProgressEntry {
+  moduleId: string;
+  examDone: boolean;
+  examScore: number; // best %, 0-100
+}
+
+export interface Badge {
+  id: string;
+  titleNl: string;
+  descriptionNl: string;
+  icon: string;
 }
