@@ -77,6 +77,11 @@ export interface WordProgress {
   mcTargetToSourceCorrect: boolean; // PT -> NL multiple choice, ever correct
 }
 
+/** A clear, human-facing learning status per word — drives both the UI
+ * (Mijn woorden / Mijn voortgang) and how often a word resurfaces via
+ * spaced repetition. Computed from WordProgress, never stored directly. */
+export type WordStatus = "nieuw" | "leren" | "bekend" | "beheerst" | "moeilijk";
+
 export interface CategoryStats {
   categoryId: string;
   wordsLearned: number;
@@ -93,8 +98,6 @@ export interface DailyActivity {
 }
 
 export interface UserProgress {
-  hearts: number;
-  maxHearts: number;
   points: number; // also used as XP for the level system
   streak: number;
   lastActiveDate: string | null; // yyyy-mm-dd, for streak calc
