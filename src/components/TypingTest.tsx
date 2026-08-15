@@ -7,7 +7,7 @@ import { isCloseEnough } from "../utils/textMatch";
 import { pickCorrectMessage, pickWrongMessage } from "../utils/encouragement";
 import { useTTS } from "../hooks/useTTS";
 import { Mascot } from "./Mascot";
-import { TypeCard, type TypeFeedback } from "./TypeCard";
+import { TypeCard, type TypeFeedback, type WriteDirection } from "./TypeCard";
 import type { Word } from "../types";
 
 async function fireConfetti() {
@@ -25,9 +25,10 @@ async function fireConfetti() {
  * regular learning flow (where typing was removed entirely), this covers
  * ALL 300 words on demand, filterable by category, with no hearts and no
  * gating: you can test yourself on anything, anytime. */
-export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: boolean) => void }) {
+export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: boolean, direction: WriteDirection) => void }) {
   const { speak } = useTTS();
   const [categoryId, setCategoryId] = useState<string>("all");
+  const [direction, setDirection] = useState<WriteDirection>("nl-pt");
   const [session, setSession] = useState<Word[] | null>(null);
   const [index, setIndex] = useState(0);
   const [typed, setTyped] = useState("");
@@ -59,11 +60,12 @@ export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: b
 
   function handleSubmit() {
     if (!current || feedback !== "idle") return;
-    const correct = isCloseEnough(typed, current.target);
+    const answer = direction === "nl-pt" ? current.target : current.source;
+    const correct = isCloseEnough(typed, answer);
     setFeedback(correct ? "correct" : "wrong");
     setCorrectCount((c) => c + (correct ? 1 : 0));
     if (!correct) setMistakes((m) => [...m, current]);
-    onAnswer(current.id, correct);
+    onAnswer(current.id, correct, direction);
     speak(current.target);
     if (correct) fireConfetti();
   }
@@ -72,7 +74,7 @@ export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: b
     if (!current || feedback !== "idle") return;
     setFeedback("wrong");
     setMistakes((m) => [...m, current]);
-    onAnswer(current.id, false);
+    onAnswer(current.id, false, direction);
   }
 
   function next() {
@@ -94,7 +96,24 @@ export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: b
             categorie of oefen alle 300 woorden door elkaar.
           </p>
 
-          <label htmlFor="typing-category" className="mt-6 block text-left text-sm font-semibold text-blue-900/70">
+          <div className="mt-6 flex rounded-2xl border-2 border-emerald-200 p-1" role="group" aria-label="Schrijfrichting">
+            <button
+              type="button"
+              onClick={() => setDirection("nl-pt")}
+              className={`flex-1 rounded-xl py-2 text-sm font-bold transition-colors ${direction === "nl-pt" ? "bg-emerald-600 text-white" : "text-blue-900/60 hover:bg-emerald-50"}`}
+            >
+              🇳🇱 → 🇧🇷 NL naar PT
+            </button>
+            <button
+              type="button"
+              onClick={() => setDirection("pt-nl")}
+              className={`flex-1 rounded-xl py-2 text-sm font-bold transition-colors ${direction === "pt-nl" ? "bg-emerald-600 text-white" : "text-blue-900/60 hover:bg-emerald-50"}`}
+            >
+              🇧🇷 → 🇳🇱 PT naar NL
+            </button>
+          </div>
+
+          <label htmlFor="typing-category" className="mt-4 block text-left text-sm font-semibold text-blue-900/70">
             Categorie
           </label>
           <select
@@ -191,6 +210,7 @@ export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: b
         >
           <TypeCard
             word={current}
+            direction={direction}
             typed={typed}
             setTyped={setTyped}
             feedback={feedback}
@@ -216,7 +236,10 @@ export function TypingTest({ onAnswer }: { onAnswer: (wordId: string, correct: b
                   </p>
                   {feedback === "wrong" && (
                     <p className="mt-1 text-sm">
-                      Het juiste antwoord is: <strong lang="pt-BR">{current.target}</strong>
+                      Het juiste antwoord is:{" "}
+                      <strong lang={direction === "nl-pt" ? "pt-BR" : undefined}>
+                        {direction === "nl-pt" ? current.target : current.source}
+                      </strong>
                     </p>
                   )}
                   <p className="mt-2 text-sm italic">
