@@ -4,6 +4,7 @@ import { words } from "../data/words";
 import { categories } from "../data/categories";
 import type { WordProgress } from "../types";
 import { useTTS } from "../hooks/useTTS";
+import { isKnown, wordStatus, WORD_STATUS_LABELS, WORD_STATUS_COLORS } from "../utils/wordStatus";
 
 type FilterMode = "alle" | "geleerd" | "nog-oefenen" | "favorieten";
 
@@ -28,8 +29,8 @@ export function Dictionary({
     return words.filter((w) => {
       if (categoryId !== "alle" && w.categoryId !== categoryId) return false;
       const wp = getWordProgress(w.id);
-      if (filter === "geleerd" && !wp.learned) return false;
-      if (filter === "nog-oefenen" && wp.learned) return false;
+      if (filter === "geleerd" && !isKnown(wp)) return false;
+      if (filter === "nog-oefenen" && isKnown(wp)) return false;
       if (filter === "favorieten" && !wp.favorite) return false;
       if (q && !w.source.toLowerCase().includes(q) && !w.target.toLowerCase().includes(q)) return false;
       return true;
@@ -125,9 +126,11 @@ export function Dictionary({
                 <p className="font-bold text-blue-950" lang="pt-BR">{w.target}</p>
                 <p className="text-xs text-blue-900/50">{w.source}</p>
               </div>
-              <div className="flex items-center gap-1.5" aria-hidden="true">
-                {wp.favorite && <span className="text-amber-500">⭐</span>}
-                {wp.learned && <span className="text-emerald-600">✅</span>}
+              <div className="flex items-center gap-1.5">
+                {wp.favorite && <span aria-hidden="true" className="text-amber-500">⭐</span>}
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${WORD_STATUS_COLORS[wordStatus(wp)]}`}>
+                  {WORD_STATUS_LABELS[wordStatus(wp)]}
+                </span>
               </div>
             </button>
           );
