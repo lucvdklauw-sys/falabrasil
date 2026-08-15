@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryStats, ExerciseKind, ThemeProgress, UserProgress, Word, WordProgress } from "../types";
 import { words } from "../data/words";
 import { categories } from "../data/categories";
 import { defaultProgress, loadProgress, saveProgress, todayStr } from "../utils/storage";
 import { applyReviewResult, createInitialWordProgress, markIntroduced, reviewPriority } from "../utils/srs";
 import { computeEarnedBadgeIds } from "../utils/gamification";
+import { isDifficult, isKnown, wordStatus } from "../utils/wordStatus";
 
 function emptyThemeProgress(themeId: string): ThemeProgress {
   return { themeId, wordsDone: false, storyDone: false, dialogueDone: false, quizDone: false, quizScore: 0 };
@@ -13,12 +14,34 @@ function emptyThemeProgress(themeId: string): ThemeProgress {
 export function useProgress() {
   const [progress, setProgress] = useState<UserProgress>(() => loadProgress() ?? defaultProgress());
 
-  // Persist on every change
+  // Persist on every change. This is the primary save path.
   useEffect(() => {
     saveProgress(progress);
   }, [progress]);
 
-  // Handle streak / daily reset of hearts on new day
+  // Belt-and-suspenders: some mobile browsers (notably iOS Safari/PWA)
+  // don't reliably run the effect above before a tab is backgrounded or
+  // closed. Keep a ref with the latest progress and force a synchronous
+  // flush on the events that actually fire in those situations, so a
+  // refresh / app-switch / close never loses the most recent answer.
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
+  useEffect(() => {
+    const flush = () => saveProgress(progressRef.current);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  // Handle streak reset on new day (no more hearts to refill — practice is unlimited).
   useEffect(() => {
     const today = todayStr();
     if (progress.lastActiveDate === today) return;
@@ -34,7 +57,6 @@ export function useProgress() {
       }
       return {
         ...p,
-        hearts: p.maxHearts,
         lastActiveDate: today,
         streak,
       };
@@ -72,22 +94,20 @@ export function useProgress() {
       return {
         ...p,
         points: p.points + (correct ? 10 : 0),
-        hearts: correct ? p.hearts : Math.max(0, p.hearts - 1),
         wordsProgress: { ...p.wordsProgress, [wordId]: updated },
         history: history.slice(-90), // keep last 90 days
       };
     });
   }, []);
 
-  /** Records an answer from the optional, standalone Schrijftest (typing
-   * test across all 300 words). Updates word progress and daily history
-   * like a normal answer, but deliberately does NOT touch hearts — the
-   * typing test is meant to be low-pressure practice you can always do,
-   * even with zero hearts left in the regular learning flow. */
-  const recordTypingAnswer = useCallback((wordId: string, correct: boolean) => {
+  /** Records an answer from the standalone Schrijftest / write-practice
+   * mode. Updates word progress and daily history exactly like a normal
+   * answer. Practice is unlimited — there is no hearts/life system. */
+  const recordTypingAnswer = useCallback((wordId: string, correct: boolean, direction: "nl-pt" | "pt-nl" = "nl-pt") => {
     setProgress((p) => {
       const current = p.wordsProgress[wordId] ?? createInitialWordProgress(wordId);
-      const updated = applyReviewResult(current, correct, "type-in");
+      const kind: ExerciseKind = direction === "nl-pt" ? "type-in" : "target-to-source";
+      const updated = applyReviewResult(current, correct, kind);
       const today = todayStr();
       const history = [...p.history];
       const idx = history.findIndex((h) => h.date === today);
@@ -115,13 +135,13 @@ export function useProgress() {
     });
   }, []);
 
-  /** Marks a word as "introduced" — the learner has seen the NL/PT pair,
-   * heard it, and read the example sentence. Never gates on correctness;
-   * introduction has no right/wrong answer. */
+  /** Marks a word as "introduced" — kept for backward-compatible word
+   * progress shape; no longer gates anything in the free-choice practice
+   * flow, but still useful metadata (has the learner ever seen this word). */
   const markWordIntroduced = useCallback((wordId: string) => {
     setProgress((p) => {
       const current = p.wordsProgress[wordId] ?? createInitialWordProgress(wordId);
-      if (current.introduced) return p; // already introduced, no-op
+      if (current.introduced) return p;
       return {
         ...p,
         wordsProgress: { ...p.wordsProgress, [wordId]: markIntroduced(current) },
@@ -142,24 +162,76 @@ export function useProgress() {
     });
   }, []);
 
-  const restoreHearts = useCallback(() => {
-    setProgress((p) => ({ ...p, hearts: p.maxHearts }));
-  }, []);
-
   /** Builds a review queue for a category: due/new words prioritized,
-   * mistakes resurface sooner (spaced repetition). */
+   * mistakes resurface sooner (spaced repetition). count defaults to the
+   * full category — practice sessions are no longer capped. */
   const getReviewQueue = useCallback(
-    (categoryId: string, count = 10): Word[] => {
+    (categoryId: string, count?: number): Word[] => {
       const catWords = words.filter((w) => w.categoryId === categoryId);
       const withPriority = catWords.map((w) => ({
         word: w,
         priority: reviewPriority(progress.wordsProgress[w.id]),
       }));
       withPriority.sort((a, b) => a.priority - b.priority);
-      return withPriority.slice(0, count).map((x) => x.word);
+      const limited = count ? withPriority.slice(0, count) : withPriority;
+      return limited.map((x) => x.word);
     },
     [progress.wordsProgress]
   );
+
+  const categoryStats: Record<string, CategoryStats> = useMemo(() => {
+    const stats: Record<string, CategoryStats> = {};
+    for (const cat of categories) {
+      const catWords = words.filter((w) => w.categoryId === cat.id);
+      let learned = 0;
+      let mistakes = 0;
+      for (const w of catWords) {
+        const wp = progress.wordsProgress[w.id];
+        if (isKnown(wp)) learned++;
+        if (wp) mistakes += wp.timesWrong;
+      }
+      stats[cat.id] = {
+        categoryId: cat.id,
+        wordsLearned: learned,
+        wordsTotal: catWords.length,
+        mistakes,
+        bestScore: 0,
+      };
+    }
+    return stats;
+  }, [progress.wordsProgress]);
+
+  // "Known" now means a solid learning status (bekend/beheerst), computed
+  // consistently everywhere via wordStatus() — not just "answered once".
+  const totalLearned = useMemo(
+    () => words.filter((w) => isKnown(progress.wordsProgress[w.id])).length,
+    [progress.wordsProgress]
+  );
+
+  const totalDifficult = useMemo(
+    () => words.filter((w) => isDifficult(progress.wordsProgress[w.id])).length,
+    [progress.wordsProgress]
+  );
+
+  const wordStatusOf = useCallback(
+    (wordId: string) => wordStatus(progress.wordsProgress[wordId]),
+    [progress.wordsProgress]
+  );
+
+  const overallAccuracy = useMemo(() => {
+    let correct = 0;
+    let total = 0;
+    for (const h of progress.history) {
+      correct += h.correct;
+      total += h.correct + h.wrong;
+    }
+    return total === 0 ? 0 : Math.round((correct / total) * 100);
+  }, [progress.history]);
+
+  const todayCount = useMemo(() => {
+    const today = todayStr();
+    return progress.history.find((h) => h.date === today)?.wordsReviewed ?? 0;
+  }, [progress.history]);
 
   // ==========================================================================
   // Theme / Module progression (Module 1 course structure)
@@ -203,50 +275,6 @@ export function useProgress() {
     });
   }, []);
 
-  const categoryStats: Record<string, CategoryStats> = useMemo(() => {
-    const stats: Record<string, CategoryStats> = {};
-    for (const cat of categories) {
-      const catWords = words.filter((w) => w.categoryId === cat.id);
-      let learned = 0;
-      let mistakes = 0;
-      for (const w of catWords) {
-        const wp = progress.wordsProgress[w.id];
-        if (wp?.learned) learned++;
-        if (wp) mistakes += wp.timesWrong;
-      }
-      stats[cat.id] = {
-        categoryId: cat.id,
-        wordsLearned: learned,
-        wordsTotal: catWords.length,
-        mistakes,
-        bestScore: 0,
-      };
-    }
-    return stats;
-  }, [progress.wordsProgress]);
-
-  const totalLearned = useMemo(
-    () => Object.values(progress.wordsProgress).filter((w) => w.learned).length,
-    [progress.wordsProgress]
-  );
-
-  const overallAccuracy = useMemo(() => {
-    let correct = 0;
-    let total = 0;
-    for (const h of progress.history) {
-      correct += h.correct;
-      total += h.correct + h.wrong;
-    }
-    return total === 0 ? 0 : Math.round((correct / total) * 100);
-  }, [progress.history]);
-
-  const todayCount = useMemo(() => {
-    const today = todayStr();
-    return progress.history.find((h) => h.date === today)?.wordsReviewed ?? 0;
-  }, [progress.history]);
-
-  // Recompute earned badges whenever relevant progress changes, and persist
-  // any newly-earned ones (append-only — badges are never revoked).
   const earnedBadgeIds = useMemo(
     () => computeEarnedBadgeIds(progress, totalLearned, words.length),
     [progress, totalLearned]
@@ -266,10 +294,11 @@ export function useProgress() {
     recordTypingAnswer,
     markWordIntroduced,
     toggleFavorite,
-    restoreHearts,
     getReviewQueue,
     categoryStats,
     totalLearned,
+    totalDifficult,
+    wordStatusOf,
     overallAccuracy,
     todayCount,
     totalWords: words.length,
