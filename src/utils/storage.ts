@@ -3,16 +3,15 @@ import type { UserProgress } from "../types";
 const STORAGE_KEY = "bp-nl:progress:v1";
 
 /** Fills in fields that may be missing from progress saved by an older
- * version of the app (e.g. before Modules/Themes/Badges existed), so
- * returning learners never hit a crash from a stale localStorage shape. */
-function normalize(p: Partial<UserProgress>): UserProgress {
+ * version of the app (e.g. before Modules/Themes/Badges existed, or from
+ * before hearts were removed), so returning learners never hit a crash
+ * from a stale localStorage shape. */
+function normalize(p: Partial<UserProgress> & Record<string, unknown>): UserProgress {
   return {
-    hearts: p.hearts ?? 5,
-    maxHearts: p.maxHearts ?? 5,
-    points: p.points ?? 0,
-    streak: p.streak ?? 0,
-    lastActiveDate: p.lastActiveDate ?? null,
-    dailyGoal: p.dailyGoal ?? 20,
+    points: typeof p.points === "number" ? p.points : 0,
+    streak: typeof p.streak === "number" ? p.streak : 0,
+    lastActiveDate: (p.lastActiveDate as string | null) ?? null,
+    dailyGoal: typeof p.dailyGoal === "number" ? p.dailyGoal : 20,
     wordsProgress: p.wordsProgress ?? {},
     history: p.history ?? [],
     themeProgress: p.themeProgress ?? {},
