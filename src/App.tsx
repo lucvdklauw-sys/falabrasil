@@ -6,7 +6,6 @@ import { modules } from "./data/modules";
 import { stories } from "./data/stories";
 import { dialogues } from "./data/dialogues";
 import { words as allWords } from "./data/words";
-import type { Word } from "./types";
 import { levelFromXp } from "./utils/gamification";
 import { Navbar } from "./components/Navbar";
 import { Dashboard } from "./components/Dashboard";
@@ -15,10 +14,11 @@ import { AppBanners } from "./components/AppBanners";
 import { Mascot } from "./components/Mascot";
 import { ModuleMap } from "./components/ModuleMap";
 import { ThemeHub, type ThemeStep } from "./components/ThemeHub";
+import { PracticeModePicker } from "./components/PracticeModePicker";
 
 const Dictionary = lazy(() => import("./components/Dictionary").then((m) => ({ default: m.Dictionary })));
 const Stats = lazy(() => import("./components/Stats").then((m) => ({ default: m.Stats })));
-const ExerciseView = lazy(() => import("./components/ExerciseView").then((m) => ({ default: m.ExerciseView })));
+const MyWords = lazy(() => import("./components/MyWords").then((m) => ({ default: m.MyWords })));
 const TypingTest = lazy(() => import("./components/TypingTest").then((m) => ({ default: m.TypingTest })));
 const StoryView = lazy(() => import("./components/StoryView").then((m) => ({ default: m.StoryView })));
 const DialogueView = lazy(() => import("./components/DialogueView").then((m) => ({ default: m.DialogueView })));
@@ -29,7 +29,8 @@ export type View =
   | "dashboard"
   | "dictionary"
   | "stats"
-  | "exercise"
+  | "mywords"
+  | "practice"
   | "typetest"
   | "module"
   | "theme"
@@ -53,11 +54,10 @@ export default function App() {
     getWordProgress,
     recordAnswer,
     recordTypingAnswer,
-    markWordIntroduced,
     toggleFavorite,
-    getReviewQueue,
     categoryStats,
     totalLearned,
+    totalDifficult,
     overallAccuracy,
     todayCount,
     totalWords,
@@ -68,12 +68,9 @@ export default function App() {
 
   const [view, setView] = useState<View>("dashboard");
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-  // Frozen for the lifetime of one exercise session — see ExerciseView for why.
-  const [sessionQueue, setSessionQueue] = useState<Word[]>([]);
-  const [sessionId, setSessionId] = useState(0);
-  // Non-null while the current /exercise session was launched from the
-  // Module 1 "Woorden leren" step — completing it marks that theme step done
-  // and returns to the theme hub instead of the flat dashboard.
+  // Non-null while the current /practice session was launched from the
+  // Module 1 "Woorden oefenen" step — completing it marks that theme step
+  // done and returns to the theme hub instead of the flat dashboard.
   const [themeExerciseId, setThemeExerciseId] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
 
@@ -83,26 +80,16 @@ export default function App() {
   function startCategory(categoryId: string) {
     setThemeExerciseId(null);
     setActiveCategoryId(categoryId);
-    setSessionQueue(getReviewQueue(categoryId, 12));
-    setSessionId((s) => s + 1);
-    setView("exercise");
+    setView("practice");
   }
 
   function startThemeWords(themeId: string) {
-    const catWords = allWords.filter((w) => w.categoryId === themeId);
     setThemeExerciseId(themeId);
     setActiveCategoryId(themeId);
-    setSessionQueue(getReviewQueue(themeId, catWords.length));
-    setSessionId((s) => s + 1);
-    setView("exercise");
+    setView("practice");
   }
 
-  function restartWithMistakes(words: Word[]) {
-    setSessionQueue(words);
-    setSessionId((s) => s + 1);
-  }
-
-  function exitExercise() {
+  function exitPractice() {
     if (themeExerciseId) {
       setActiveCategoryId(themeExerciseId);
       setThemeExerciseId(null);
@@ -114,7 +101,7 @@ export default function App() {
   }
 
   function navigate(v: View) {
-    if (v !== "exercise") setActiveCategoryId(null);
+    if (v !== "practice") setActiveCategoryId(null);
     setThemeExerciseId(null);
     setView(v);
   }
@@ -143,6 +130,7 @@ export default function App() {
   }, [view]);
 
   const activeCategory = categories.find((c) => c.id === activeCategoryId) ?? null;
+  const activePracticeWords = activeCategoryId ? allWords.filter((w) => w.categoryId === activeCategoryId) : [];
   const level = levelFromXp(progress.points);
 
   return (
@@ -154,8 +142,6 @@ export default function App() {
         <BackgroundDecor />
         <AppBanners />
         <Navbar
-          hearts={progress.hearts}
-          maxHearts={progress.maxHearts}
           points={progress.points}
           streak={progress.streak}
           learned={totalLearned}
@@ -200,32 +186,34 @@ export default function App() {
             />
           )}
 
+          {view === "practice" && activeCategory && activePracticeWords.length > 0 && (
+            <PracticeModePicker
+              title={activeCategory.nameNl}
+              wordSet={activePracticeWords}
+              onExit={exitPractice}
+              onAnswer={recordAnswer}
+              onWriteAnswer={recordTypingAnswer}
+              onSessionComplete={themeExerciseId ? () => markThemeStep(themeExerciseId, "wordsDone") : undefined}
+            />
+          )}
+
           <Suspense fallback={<ViewLoader />}>
             {view === "dictionary" && (
               <Dictionary getWordProgress={getWordProgress} toggleFavorite={toggleFavorite} />
+            )}
+
+            {view === "mywords" && (
+              <MyWords getWordProgress={getWordProgress} toggleFavorite={toggleFavorite} />
             )}
 
             {view === "stats" && (
               <Stats
                 progress={progress}
                 totalLearned={totalLearned}
+                totalDifficult={totalDifficult}
                 totalWords={totalWords}
                 overallAccuracy={overallAccuracy}
-              />
-            )}
-
-            {view === "exercise" && activeCategory && (
-              <ExerciseView
-                key={sessionId}
-                category={activeCategory}
-                queue={sessionQueue}
-                hearts={progress.hearts}
-                getWordProgress={getWordProgress}
-                onAnswer={recordAnswer}
-                onIntroduced={markWordIntroduced}
-                onExit={exitExercise}
-                onRestartMistakes={restartWithMistakes}
-                onComplete={themeExerciseId ? () => markThemeStep(themeExerciseId, "wordsDone") : undefined}
+                categoryStats={categoryStats}
               />
             )}
 
