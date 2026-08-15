@@ -2,8 +2,6 @@ import { motion } from "framer-motion";
 import type { View } from "../App";
 
 export function Navbar({
-  hearts,
-  maxHearts,
   points,
   streak,
   learned,
@@ -11,8 +9,6 @@ export function Navbar({
   view,
   onNavigate,
 }: {
-  hearts: number;
-  maxHearts: number;
   points: number;
   streak: number;
   learned: number;
@@ -52,19 +48,20 @@ export function Navbar({
           </span>
         </button>
 
-        <nav className="flex items-center gap-1 sm:gap-2" aria-label="Hoofdnavigatie">
+        <nav className="flex flex-wrap items-center justify-end gap-1 sm:gap-2" aria-label="Hoofdnavigatie">
           {navItem("dashboard", "Start", "🏠")}
+          {navItem("mywords", "Mijn woorden", "📚")}
           {navItem("dictionary", "Woordenboek", "📖")}
           {navItem("typetest", "Schrijftest", "✍️")}
-          {navItem("stats", "Statistieken", "📊")}
+          {navItem("stats", "Voortgang", "📊")}
         </nav>
 
         <div className="flex items-center gap-2 sm:gap-3" role="group" aria-label="Jouw voortgang">
-          <div className="flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-sm font-bold text-red-700 sm:px-3">
-            <span aria-hidden="true">❤️</span>
-            <motion.span key={hearts} initial={{ scale: 1.4 }} animate={{ scale: 1 }}>
-              <span className="sr-only">Levens: </span>
-              {hearts}/{maxHearts}
+          <div className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-sm font-bold text-emerald-700 sm:px-3">
+            <span aria-hidden="true">📚</span>
+            <motion.span key={learned} initial={{ scale: 1.3 }} animate={{ scale: 1 }}>
+              <span className="sr-only">Woorden bekend: </span>
+              {learned}/{total}
             </motion.span>
           </div>
           <div className="hidden items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-sm font-bold text-amber-700 sm:flex">
@@ -79,13 +76,6 @@ export function Navbar({
             <span>
               <span className="sr-only">Streak: </span>
               {streak}
-            </span>
-          </div>
-          <div className="hidden items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700 md:flex">
-            <span aria-hidden="true">📚</span>
-            <span>
-              <span className="sr-only">Woorden geleerd: </span>
-              {learned}/{total}
             </span>
           </div>
         </div>
