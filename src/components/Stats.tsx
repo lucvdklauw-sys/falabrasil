@@ -1,6 +1,8 @@
 import { motion } from "framer-motion";
-import type { DailyActivity, UserProgress } from "../types";
+import type { CategoryStats, DailyActivity, ThemeProgress, UserProgress } from "../types";
 import { badges } from "../data/badges";
+import { modules } from "../data/modules";
+import { categories } from "../data/categories";
 import { levelFromXp, xpIntoLevel } from "../utils/gamification";
 
 function StatCard({ icon, label, value, sub }: { icon: string; label: string; value: string; sub?: string }) {
@@ -54,28 +56,71 @@ function WeekChart({ history }: { history: DailyActivity[] }) {
   );
 }
 
+function ThemeBar({ nameNl, icon, pct, done }: { nameNl: string; icon: string; pct: number; done: boolean }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="flex items-center gap-1.5 font-semibold text-blue-950">
+          <span aria-hidden="true">{icon}</span> {nameNl} {done && <span aria-hidden="true">✅</span>}
+        </span>
+        <span className="font-bold text-blue-900/50">{pct}%</span>
+      </div>
+      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-emerald-50">
+        <motion.div
+          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600"
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.6 }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Stats({
   progress,
   totalLearned,
+  totalDifficult,
   totalWords,
   overallAccuracy,
+  categoryStats,
 }: {
   progress: UserProgress;
   totalLearned: number;
+  totalDifficult: number;
   totalWords: number;
   overallAccuracy: number;
+  categoryStats: Record<string, CategoryStats>;
 }) {
   const totalReviewed = progress.history.reduce((s, h) => s + h.wordsReviewed, 0);
   const todayCount = progress.history.find((h) => h.date === new Date().toISOString().slice(0, 10))?.wordsReviewed ?? 0;
+  const overallPct = totalWords === 0 ? 0 : Math.round((totalLearned / totalWords) * 100);
+
+  const module1 = modules[0];
+  const themesCompleted = module1
+    ? module1.themeIds.filter((id) => {
+        const tp: ThemeProgress | undefined = progress.themeProgress[id];
+        return !!tp && tp.wordsDone && tp.storyDone && tp.dialogueDone && tp.quizDone;
+      }).length
+    : 0;
+
+  const quizScores = module1 ? module1.themeIds.map((id) => progress.themeProgress[id]?.quizScore ?? 0).filter((s) => s > 0) : [];
+  const avgQuizScore = quizScores.length ? Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length) : null;
+  const examScores = Object.values(progress.moduleProgress).map((m) => m.examScore).filter((s) => s > 0);
+  const avgExamScore = examScores.length ? Math.round(examScores.reduce((a, b) => a + b, 0) / examScores.length) : null;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
-      <h1 className="font-display text-2xl font-bold text-blue-950">Statistieken</h1>
+      <h1 className="font-display text-2xl font-bold text-blue-950">📊 Mijn voortgang</h1>
       <p className="mt-1 text-blue-900/50">Jouw voortgang in het Braziliaans Portugees.</p>
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard icon="📚" label="Totaal geleerd" value={`${totalLearned}/${totalWords}`} />
+        <StatCard icon="📚" label="Woorden bekend" value={`${totalLearned}/${totalWords}`} sub={`${overallPct}% totale voortgang`} />
+        <StatCard icon="⚠️" label="Moeilijke woorden" value={`${totalDifficult}`} />
+        <StatCard icon="🎓" label="Thema's voltooid" value={module1 ? `${themesCompleted}/${module1.themeIds.length}` : "0/0"} />
         <StatCard icon="🎯" label="Juist percentage" value={`${overallAccuracy}%`} />
+        {avgQuizScore !== null && <StatCard icon="📝" label="Gem. themaquizscore" value={`${avgQuizScore}%`} />}
+        {avgExamScore !== null && <StatCard icon="🏆" label="Gem. examenscore" value={`${avgExamScore}%`} />}
         <StatCard icon="🔁" label="Geoefende woorden" value={`${totalReviewed}`} />
         <StatCard icon="⭐" label="Punten (XP)" value={`${progress.points}`} />
         <StatCard
@@ -92,6 +137,23 @@ export function Stats({
           sub="woorden vandaag"
         />
       </div>
+
+      {module1 && (
+        <div className="mt-6 rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+          <h3 className="font-display font-bold text-blue-950">Voortgang per thema — {module1.titleNl}</h3>
+          <div className="mt-4 flex flex-col gap-4">
+            {module1.themeIds.map((id) => {
+              const cat = categories.find((c) => c.id === id);
+              const stats = categoryStats[id];
+              const tp = progress.themeProgress[id];
+              if (!cat || !stats) return null;
+              const pct = stats.wordsTotal === 0 ? 0 : Math.round((stats.wordsLearned / stats.wordsTotal) * 100);
+              const done = !!tp && tp.wordsDone && tp.storyDone && tp.dialogueDone && tp.quizDone;
+              return <ThemeBar key={id} nameNl={cat.nameNl} icon={cat.icon} pct={pct} done={done} />;
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="mt-6">
         <WeekChart history={progress.history} />
