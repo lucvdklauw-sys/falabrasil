@@ -1,39 +1,5 @@
-import type { ExerciseKind, Word, WordProgress } from "../types";
+import type { ExerciseKind, Word } from "../types";
 import { words as allWords } from "../data/words";
-
-/** A single step in a learning session. "intro" is a non-answerable
- * presentation step (word, audio, example sentence) — every other kind is
- * an answerable exercise. Typing is deliberately NOT part of this pipeline
- * — it lives in the separate, optional "Schrijftest" mode that covers all
- * 300 words on demand instead of being forced into every session. */
-export type StepKind = "intro" | ExerciseKind;
-
-export interface LearningStep {
-  word: Word;
-  kind: StepKind;
-}
-
-// The pool of exercise kinds used once a word is "graduated" (introduced +
-// both MC directions ever correct). Mixed randomly so no session feels the
-// same: listening/word-choice both directions, sentence-context matching,
-// cloze (fill in the missing word), and word-in-context recognition.
-const REVIEW_KINDS: ExerciseKind[] = [
-  "source-to-target",
-  "target-to-source",
-  "sentence-match",
-  "cloze",
-  "word-in-context",
-];
-
-// Minimum number of OTHER steps that must appear before the same word can
-// resurface. This is what stops a session from feeling like "1x luisteren,
-// 1x kiezen, dan andersom" in a predictable row — words get mixed together.
-const MIN_REPEAT_GAP = 2;
-
-// Never let the same exercise KIND appear more than 2x in a row, even
-// across different words — "nooit meer dan twee keer dezelfde oefenvorm
-// achter elkaar".
-const MAX_SAME_KIND_STREAK = 2;
 
 export function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -42,95 +8,6 @@ export function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
-}
-
-function pickReviewKind(): ExerciseKind {
-  return REVIEW_KINDS[Math.floor(Math.random() * REVIEW_KINDS.length)];
-}
-
-/** Interleaves several per-word step queues into a single session. Each
- * word's own steps keep their required internal order (e.g. "intro" always
- * comes first for that word), but different words are woven together with
- * a cooldown so the same word's steps never land back-to-back. On top of
- * that, a second pass avoids the same exercise KIND repeating more than
- * MAX_SAME_KIND_STREAK times in a row, regardless of which word it's for —
- * this is the "husselen" pass: instead of doing all of one word's steps
- * consecutively then moving to the next, the whole session is shuffled
- * step-by-step, and exercise *forms* are mixed too. */
-function interleaveQueues(queues: LearningStep[][]): LearningStep[] {
-  const active = queues.map((q) => [...q]).filter((q) => q.length > 0);
-  const result: LearningStep[] = [];
-  const lastPositionByQueue = new Map<number, number>();
-
-  while (active.some((q) => q.length > 0)) {
-    const withSteps = active.map((q, i) => ({ i, q })).filter(({ q }) => q.length > 0);
-    const eligibleByWord = withSteps.filter(({ i }) => {
-      const last = lastPositionByQueue.get(i);
-      return last === undefined || result.length - last > MIN_REPEAT_GAP;
-    });
-    let pool = eligibleByWord.length > 0 ? eligibleByWord : withSteps;
-
-    // Avoid the same exercise kind running MAX_SAME_KIND_STREAK times in a
-    // row: if the tail of `result` is already at the streak cap, filter out
-    // candidates whose next step shares that kind (unless nothing else
-    // is available, in which case we have no choice).
-    const tailLen = Math.min(result.length, MAX_SAME_KIND_STREAK);
-    const tail = result.slice(-tailLen);
-    const streaking = tailLen === MAX_SAME_KIND_STREAK && tail.every((s) => s.kind === tail[0].kind);
-    if (streaking) {
-      const bannedKind = tail[0].kind;
-      const filtered = pool.filter(({ q }) => q[0].kind !== bannedKind);
-      if (filtered.length > 0) pool = filtered;
-    }
-
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    const step = pick.q.shift()!;
-    result.push(step);
-    lastPositionByQueue.set(pick.i, result.length - 1);
-  }
-  return result;
-}
-
-/** Builds a learning session that respects the natural acquisition order:
- * a brand-new word is always Introduced -> seen in both multiple-choice
- * directions -> and immediately also checked in context via a short,
- * easy example sentence ("zinnen waarvan de bijpassende vertaling gevonden
- * moet worden"). A word already fully "known" (introduced + both MC
- * directions ever correct) gets a single review step, randomly rotated
- * across all 5 review exercise kinds.
- *
- * Steps from different words are interleaved rather than grouped into
- * fixed per-word blocks, and the interleaver also caps how many times the
- * same exercise kind can appear consecutively — see interleaveQueues(). */
-export function buildLearningSteps(
-  queue: Word[],
-  progressOf: (wordId: string) => WordProgress | undefined
-): LearningStep[] {
-  const perWordQueues: LearningStep[][] = queue.map((word) => {
-    const wp = progressOf(word.id);
-    const introduced = wp?.introduced ?? false;
-    const mcS2T = wp?.mcSourceToTargetCorrect ?? false;
-    const mcT2S = wp?.mcTargetToSourceCorrect ?? false;
-
-    if (!introduced) {
-      return [
-        { word, kind: "intro" as const },
-        { word, kind: "source-to-target" as const },
-        { word, kind: "target-to-source" as const },
-        { word, kind: "sentence-match" as const },
-      ];
-    }
-    if (!mcS2T || !mcT2S) {
-      const steps: LearningStep[] = [];
-      if (!mcS2T) steps.push({ word, kind: "source-to-target" });
-      if (!mcT2S) steps.push({ word, kind: "target-to-source" });
-      return steps;
-    }
-    // fully "graduated" word: one ordinary spaced-repetition review step
-    return [{ word, kind: pickReviewKind() }];
-  });
-
-  return interleaveQueues(perWordQueues);
 }
 
 /** Builds 4 multiple-choice options (1 correct + 3 distractors). */
@@ -210,4 +87,77 @@ export function buildWordInContextOptions(word: Word): string[] {
     distractors = [...distractors, ...extra];
   }
   return shuffle([word.target, ...distractors]);
+}
+
+// ============================================================================
+// Free-choice practice mode engine — the learner picks HOW they want to
+// practise a word set (theme or category); nothing is forced, and practice
+// is unlimited (no hearts, no gating, no fixed session length).
+// ============================================================================
+
+export type PracticeMode = "pt-nl" | "nl-pt" | "context" | "mixed";
+
+/** The 3 "words in sentences" kinds, and the 2 direct multiple-choice
+ * kinds. Write mode is deliberately NOT part of this pool — it always
+ * stays a fully separate flow (see WriteSession). */
+export type PracticeKind = Extract<
+  ExerciseKind,
+  "source-to-target" | "target-to-source" | "sentence-match" | "cloze" | "word-in-context"
+>;
+
+export interface PracticeItem {
+  word: Word;
+  kind: PracticeKind;
+}
+
+const CONTEXT_KINDS: PracticeKind[] = ["sentence-match", "cloze", "word-in-context"];
+const MIXED_KINDS: PracticeKind[] = ["source-to-target", "target-to-source", ...CONTEXT_KINDS];
+const MAX_SAME_KIND_STREAK = 2;
+
+function pickKind(pool: PracticeKind[]): PracticeKind {
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/** Caps how many times the same exercise kind can appear in a row (used by
+ * "context" and "mixed" modes, where the kind varies per word) — keeps a
+ * session from feeling repetitive even though the learner picked "mixed". */
+function dedupeKindStreaks(items: PracticeItem[], pool: PracticeKind[]): PracticeItem[] {
+  const result = [...items];
+  for (let i = MAX_SAME_KIND_STREAK; i < result.length; i++) {
+    const tail = result.slice(i - MAX_SAME_KIND_STREAK, i);
+    const streaking = tail.every((t) => t.kind === tail[0].kind);
+    if (streaking && result[i].kind === tail[0].kind) {
+      const swapIdx = result.findIndex((it, idx) => idx > i && it.kind !== tail[0].kind);
+      if (swapIdx !== -1) {
+        [result[i], result[swapIdx]] = [result[swapIdx], result[i]];
+      } else {
+        // no alternative left later in the queue — just pick a different kind
+        const alt = pool.find((k) => k !== tail[0].kind);
+        if (alt) result[i] = { ...result[i], kind: alt };
+      }
+    }
+  }
+  return result;
+}
+
+/** Builds one practice session for a chosen mode over a given word set.
+ * Every word in the set gets exactly one question — the learner can
+ * always start a fresh session (unlimited repetition). */
+export function buildPracticeItems(wordSet: Word[], mode: PracticeMode): PracticeItem[] {
+  const shuffled = shuffle(wordSet);
+  let items: PracticeItem[];
+
+  if (mode === "pt-nl") {
+    items = shuffled.map((word) => ({ word, kind: "target-to-source" as const }));
+  } else if (mode === "nl-pt") {
+    items = shuffled.map((word) => ({ word, kind: "source-to-target" as const }));
+  } else if (mode === "context") {
+    items = shuffled.map((word) => ({ word, kind: pickKind(CONTEXT_KINDS) }));
+    items = dedupeKindStreaks(items, CONTEXT_KINDS);
+  } else {
+    items = shuffled.map((word) => ({ word, kind: pickKind(MIXED_KINDS) }));
+    items = dedupeKindStreaks(items, MIXED_KINDS);
+  }
+
+  return items;
 }
