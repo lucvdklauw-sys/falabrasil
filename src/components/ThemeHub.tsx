@@ -10,8 +10,9 @@ const STEPS: { key: ThemeStep; icon: string; label: string; doneKey: keyof Theme
   { key: "quiz", icon: "📝", label: "Themaquiz", doneKey: "quizDone" },
 ];
 
-/** The per-theme hub: 4 sequentially-gated steps. Step N+1 unlocks only
- * once step N is marked done in ThemeProgress. */
+/** The per-theme hub: 4 onderdelen, allemaal altijd beschikbaar. Niets is
+ * vergrendeld — de leerder kiest zelf in welke volgorde hij een thema
+ * doorloopt (bv. eerst de quiz proberen, of alleen het verhaal lezen). */
 export function ThemeHub({
   category,
   themeProgress,
@@ -32,35 +33,31 @@ export function ThemeHub({
           <h1 className="font-display text-xl font-extrabold text-blue-950 sm:text-2xl">{category.nameNl}</h1>
         </div>
       </div>
+      <p className="mb-4 text-sm text-blue-900/50">Kies zelf waarmee je begint — niets is vergrendeld.</p>
 
       <div className="flex flex-col gap-3">
         {STEPS.map((s, i) => {
           const done = !!themeProgress[s.doneKey];
-          const prevDone = i === 0 || !!themeProgress[STEPS[i - 1].doneKey];
-          const unlocked = prevDone;
           return (
             <motion.button
               key={s.key}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              disabled={!unlocked}
               onClick={() => onSelectStep(s.key)}
               className={`btn-pop flex items-center gap-4 rounded-3xl border-2 p-4 text-left shadow-sm transition-colors sm:p-5 ${
                 done
                   ? "border-emerald-400 bg-emerald-50"
-                  : unlocked
-                  ? "border-emerald-100 bg-white hover:border-emerald-300 hover:bg-emerald-50"
-                  : "border-gray-100 bg-gray-50 opacity-60"
+                  : "border-emerald-100 bg-white hover:border-emerald-300 hover:bg-emerald-50"
               }`}
             >
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm" aria-hidden="true">
-                {unlocked ? s.icon : "🔒"}
+                {s.icon}
               </span>
               <span className="flex-1">
                 <span className="block font-display text-base font-bold text-blue-950">{s.label}</span>
                 <span className="mt-0.5 block text-sm text-blue-900/50">
-                  {done ? "Voltooid ✅" : unlocked ? "Beschikbaar" : "Rond het vorige onderdeel eerst af"}
+                  {done ? "Voltooid ✅" : "Beschikbaar"}
                 </span>
               </span>
               {s.key === "quiz" && done && themeProgress.quizScore > 0 && (
